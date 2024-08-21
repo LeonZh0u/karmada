@@ -7095,7 +7095,7 @@ func schema_pkg_apis_work_v1alpha2_ResourceBindingSpec(ref common.ReferenceCallb
 					},
 					"rescheduleTriggeredAt": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RescheduleTriggeredAt is a timestamp representing when the referenced resource is triggered rescheduling. When this field is updated, it means a rescheduling is manually triggered by user, and the expected behavior of this action is to do a complete recalculation without referring to last scheduling results. It works with the status.lastScheduledTime field, and only when this timestamp is later than timestamp in status.lastScheduledTime will the rescheduling actually execute, otherwise, ignored.\n\nIt is represented in RFC3339 form (like '2006-01-02T15:04:05Z') and is in UTC.",
+							Description: "RescheduleTriggeredAt is a timestamp representing when the referenced resource is triggered rescheduling. When this field is updated, it means a rescheduling is manually triggered by user, and the expected behavior of this action is to do a complete recalculation without referring to last scheduling results. It works with the status.lastScheduledTime field, and only when this timestamp is later than timestamp in status.lastScheduledTime will the rescheduling actually execute, otherwise, ignored.\n\nFor priority & preemption, when victim Resourcebindings are preempted, RescheduleTriggeredAt is updated for rescheduling victim resource bindings. It is represented in RFC3339 form (like '2006-01-02T15:04:05Z') and is in UTC.",
 							Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
 						},
 					},
@@ -7103,6 +7103,28 @@ func schema_pkg_apis_work_v1alpha2_ResourceBindingSpec(ref common.ReferenceCallb
 						SchemaProps: spec.SchemaProps{
 							Description: "Suspension declares the policy for suspending different aspects of propagation. nil means no suspension. no default values.",
 							Ref:         ref("github.com/karmada-io/karmada/pkg/apis/policy/v1alpha1.Suspension"),
+						},
+					},
+					"nominatedClusters": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NominatedClusters represent target member clusters where the preempting resource can be deployed.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("github.com/karmada-io/karmada/pkg/apis/work/v1alpha2.TargetCluster"),
+									},
+								},
+							},
+						},
+					},
+					"preemptionPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PreemptionPolicy is the Policy for preempting resource bindings One of Never, PreemptLowerPriority. Defaults to Never if unset.\n\nPossible enum values:\n - `\"Never\"` means that pod never preempts other pods with lower priority.\n - `\"PreemptLowerPriority\"` means that pod can preempt other pods with lower priority.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Never", "PreemptLowerPriority"},
 						},
 					},
 				},

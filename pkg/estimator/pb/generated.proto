@@ -106,6 +106,10 @@ message ReplicaRequirements {
   // ResourceQuota have an associated set of scopes, one of them is priority class
   // +optional
   optional string priorityClassName = 4;
+
+  // Priority represents the integer value of this priority class.
+  // +optional
+  optional int32 priority = 5;
 }
 
 // UnschedulableReplicasRequest represents the request that sent by gRPC client to calculate unschedulable replicas.

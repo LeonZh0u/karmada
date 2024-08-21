@@ -66,6 +66,9 @@ type ReplicaRequirements struct {
 	// ResourceQuota have an associated set of scopes, one of them is priority class
 	// +optional
 	PriorityClassName string `json:"priorityClassName,omitempty" protobuf:"bytes,4,opt,name=priorityClassName"`
+	// Priority represents the integer value of this priority class.
+	// +optional
+	Priority int32 `json:"priority,omitempty" protobuf:"bytes,5,opt,name=priority"`
 }
 
 // MaxAvailableReplicasResponse represents the response that sent by gRPC server to calculate max available replicas.
