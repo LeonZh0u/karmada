@@ -143,6 +143,8 @@ type ResourceBindingSpec struct {
 	// It works with the status.lastScheduledTime field, and only when this timestamp is later than timestamp in
 	// status.lastScheduledTime will the rescheduling actually execute, otherwise, ignored.
 	//
+	// For priority & preemption, when victim Resourcebindings are preempted, RescheduleTriggeredAt is updated for
+	// rescheduling victim resource bindings.
 	// It is represented in RFC3339 form (like '2006-01-02T15:04:05Z') and is in UTC.
 	// +optional
 	RescheduleTriggeredAt *metav1.Time `json:"rescheduleTriggeredAt,omitempty"`
@@ -159,6 +161,15 @@ type ResourceBindingSpec struct {
 	// This setting applies to all Work objects created under this binding object.
 	// +optional
 	PreserveResourcesOnDeletion *bool `json:"preserveResourcesOnDeletion,omitempty"`
+	// NominatedClusters represent target member clusters where the preempting resource can be deployed.
+	// +optional
+	NominatedClusters []TargetCluster `json:"nominatedClusters,omitempty"`
+
+	// PreemptionPolicy is the Policy for preempting resource bindings
+	// One of Never, PreemptLowerPriority.
+	// Defaults to Never if unset.
+	// +optional
+	PreemptionPolicy *corev1.PreemptionPolicy `json:"preemptionPolicy,omitempty"`
 }
 
 // ObjectReference contains enough information to locate the referenced object inside current cluster.

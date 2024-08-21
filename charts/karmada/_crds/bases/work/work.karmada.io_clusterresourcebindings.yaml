@@ -425,6 +425,24 @@ spec:
                   - reason
                   type: object
                 type: array
+              nominatedClusters:
+                description: NominatedClusters represent target member clusters where
+                  the preempting resource can be deployed.
+                items:
+                  description: TargetCluster represents the identifier of a member
+                    cluster.
+                  properties:
+                    name:
+                      description: Name of target cluster.
+                      type: string
+                    replicas:
+                      description: Replicas in target cluster
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                type: array
               placement:
                 description: Placement represents the rule for select clusters to
                   propagate resources.
@@ -930,6 +948,7 @@ spec:
                       type: object
                     type: array
                 type: object
+<<<<<<< HEAD
               preserveResourcesOnDeletion:
                 description: |-
                   PreserveResourcesOnDeletion controls whether resources should be preserved on the
@@ -938,6 +957,14 @@ spec:
                   Default is false, which means resources will be deleted along with the binding object.
                   This setting applies to all Work objects created under this binding object.
                 type: boolean
+=======
+              preemptionPolicy:
+                description: |-
+                  PreemptionPolicy is the Policy for preempting resource bindings
+                  One of Never, PreemptLowerPriority.
+                  Defaults to Never if unset.
+                type: string
+>>>>>>> 84fb706ef (Update resourcebinding specs to support Priority&Preemption)
               propagateDeps:
                 description: |-
                   PropagateDeps tells if relevant resources should be propagated automatically.
@@ -1159,6 +1186,8 @@ spec:
                   status.lastScheduledTime will the rescheduling actually execute, otherwise, ignored.
 
 
+                  For priority & preemption, when victim Resourcebindings are preempted, RescheduleTriggeredAt is updated for
+                  rescheduling victim resource bindings.
                   It is represented in RFC3339 form (like '2006-01-02T15:04:05Z') and is in UTC.
                 format: date-time
                 type: string
