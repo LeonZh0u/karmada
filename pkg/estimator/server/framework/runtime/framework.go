@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/karmada-io/karmada/pkg/estimator/server/preemptee"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 
@@ -41,6 +42,8 @@ const (
 // plugins.
 type frameworkImpl struct {
 	estimateReplicasPlugins []framework.EstimateReplicasPlugin
+	preemptionFilterPlugins []framework.PreemptionFilterPlugin
+	preemptionOrderPlugins  []framework.PreemptionOrderPlugin
 	clientSet               clientset.Interface
 	informerFactory         informers.SharedInformerFactory
 }
@@ -84,6 +87,10 @@ func NewFramework(r Registry, opts ...Option) (framework.Framework, error) {
 	}
 	estimateReplicasPluginsList := reflect.ValueOf(&f.estimateReplicasPlugins).Elem()
 	estimateReplicasType := estimateReplicasPluginsList.Type().Elem()
+	preemptionFilterPluginsList := reflect.ValueOf(&f.preemptionFilterPlugins).Elem()
+	preemptionFilterType := preemptionFilterPluginsList.Type().Elem()
+	preemptionOrderPluginsList := reflect.ValueOf(&f.preemptionOrderPlugins).Elem()
+	preemptionOrderType := preemptionOrderPluginsList.Type().Elem()
 
 	for name, factory := range r {
 		p, err := factory(f)
@@ -91,6 +98,8 @@ func NewFramework(r Registry, opts ...Option) (framework.Framework, error) {
 			return nil, fmt.Errorf("failed to initialize plugin %q: %w", name, err)
 		}
 		addPluginToList(p, estimateReplicasType, &estimateReplicasPluginsList)
+		addPluginToList(p, preemptionFilterType, &preemptionFilterPluginsList)
+		addPluginToList(p, preemptionOrderType, &preemptionOrderPluginsList)
 	}
 	return f, nil
 }
@@ -143,4 +152,62 @@ func (frw *frameworkImpl) runEstimateReplicasPlugins(
 	replica, ret := pl.Estimate(ctx, snapshot, replicaRequirements)
 	metrics.PluginExecutionDuration.WithLabelValues(pl.Name(), estimator).Observe(utilmetrics.DurationInSeconds(startTime))
 	return replica, ret
+}
+
+// RunPreemptionFilterPlugins runs the set of configured PreemptionFilterPlugins
+// for filtering resourcebindings based on the given PreemptionRequest.
+// It returns an integer and an error.
+// The integer represents the minimum calculated value of estimated replicas from each EstimateReplicasPlugin.
+func (frw *frameworkImpl) RunPreemptionFilterPlugins(ctx context.Context, candidateVictims *map[string]preemptee.CandidateVictim, preemptionRequest *pb.PreemptionRequest) (*map[string]preemptee.CandidateVictim, *framework.Result) {
+	startTime := time.Now()
+	defer func() {
+		metrics.FrameworkExtensionPointDuration.WithLabelValues(estimator).Observe(utilmetrics.DurationInSeconds(startTime))
+	}()
+	results := make(framework.PluginToResult)
+	for _, pl := range frw.preemptionFilterPlugins {
+		ret := frw.runPreemptionFilterPlugins(ctx, pl, candidateVictims, preemptionRequest)
+		results[pl.Name()] = ret
+	}
+	return candidateVictims, results.Merge()
+}
+
+func (frw *frameworkImpl) runPreemptionFilterPlugins(
+	ctx context.Context,
+	pl framework.PreemptionFilterPlugin,
+	candidateVictims *map[string]preemptee.CandidateVictim,
+	preemptionRequest *pb.PreemptionRequest,
+) *framework.Result {
+	startTime := time.Now()
+	ret := pl.Filter(ctx, candidateVictims, preemptionRequest)
+	metrics.PluginExecutionDuration.WithLabelValues(pl.Name(), estimator).Observe(utilmetrics.DurationInSeconds(startTime))
+	return ret
+}
+
+// RunPreemptionFilterPlugins runs the set of configured PreemptionFilterPlugins
+// for filtering resourcebindings based on the given PreemptionRequest.
+// It returns an integer and an error.
+// The integer represents the minimum calculated value of estimated replicas from each EstimateReplicasPlugin.
+func (frw *frameworkImpl) RunPreemptionOrderPlugins(ctx context.Context, candidateVictims *map[string]preemptee.CandidateVictim, preemptionRequest *pb.PreemptionRequest) ([]*preemptee.CandidateVictim, *framework.Result) {
+	startTime := time.Now()
+	defer func() {
+		metrics.FrameworkExtensionPointDuration.WithLabelValues(estimator).Observe(utilmetrics.DurationInSeconds(startTime))
+	}()
+	results := make(framework.PluginToResult)
+	// Only one ordering plugin is supported for now
+	pl := frw.preemptionOrderPlugins[0]
+	orderedCandidateVictims, ret := frw.runPreemptionOrderPlugins(ctx, pl, candidateVictims, preemptionRequest)
+	results[pl.Name()] = ret
+	return orderedCandidateVictims, results.Merge()
+}
+
+func (frw *frameworkImpl) runPreemptionOrderPlugins(
+	ctx context.Context,
+	pl framework.PreemptionOrderPlugin,
+	candidateVictims *map[string]preemptee.CandidateVictim,
+	preemptionRequest *pb.PreemptionRequest,
+) ([]*preemptee.CandidateVictim, *framework.Result) {
+	startTime := time.Now()
+	orderedCandidateVictims, ret := pl.Order(ctx, candidateVictims, preemptionRequest)
+	metrics.PluginExecutionDuration.WithLabelValues(pl.Name(), estimator).Observe(utilmetrics.DurationInSeconds(startTime))
+	return orderedCandidateVictims, ret
 }

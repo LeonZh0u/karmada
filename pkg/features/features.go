@@ -43,6 +43,12 @@ const (
 
 	// ResourceQuotaEstimate indicates if enable resource quota check in estimator
 	ResourceQuotaEstimate featuregate.Feature = "ResourceQuotaEstimate"
+
+	// PriorityClassEstimate indicates if enable priorityClass based filter for priority & premption in estimator
+	PriorityClassFilterEstimate featuregate.Feature = "PriorityClassFilterEstimate"
+
+	// DefaultPreemptionOrderEstimate indicates if enable priorityClass based filter for priority & premption in estimator
+	DefaultPreemptionOrderEstimate featuregate.Feature = "DefaultPreemptionOrderEstimate"
 )
 
 var (

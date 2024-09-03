@@ -47,6 +47,7 @@ import (
 	frameworkplugins "github.com/karmada-io/karmada/pkg/estimator/server/framework/plugins"
 	frameworkruntime "github.com/karmada-io/karmada/pkg/estimator/server/framework/runtime"
 	"github.com/karmada-io/karmada/pkg/estimator/server/metrics"
+	"github.com/karmada-io/karmada/pkg/estimator/server/preemptee"
 	"github.com/karmada-io/karmada/pkg/estimator/server/replica"
 	estimatorservice "github.com/karmada-io/karmada/pkg/estimator/service"
 	"github.com/karmada-io/karmada/pkg/util"
@@ -83,6 +84,7 @@ type AccurateSchedulerEstimatorServer struct {
 	informerManager   genericmanager.SingleClusterInformerManager
 	parallelizer      parallelize.Parallelizer
 	estimateFramework framework.Framework
+	PreempteeLister   preemptee.PreempteeLister
 
 	Cache schedcache.Cache
 
@@ -111,6 +113,10 @@ func NewEstimatorServer(
 		replicaLister: &replica.ListerWrapper{
 			PodLister:        informerFactory.Core().V1().Pods().Lister(),
 			ReplicaSetLister: informerFactory.Apps().V1().ReplicaSets().Lister(),
+		},
+		PreempteeLister: preemptee.PreempteeLister{
+			PodLister:  informerFactory.Core().V1().Pods().Lister(),
+			NodeLister: informerFactory.Core().V1().Nodes().Lister(),
 		},
 		parallelizer: parallelize.NewParallelizer(opts.Parallelism),
 		Cache:        schedcache.New(durationToExpireAssumedPod, stopChan),
@@ -278,8 +284,42 @@ func (es *AccurateSchedulerEstimatorServer) GetUnschedulableReplicas(ctx context
 	return &pb.UnschedulableReplicasResponse{UnschedulableReplicas: unschedulables}, err
 }
 
-func (es *AccurateSchedulerEstimatorServer) GetVictimResourceBindings(ctx context.Context, req *pb.PreemptionRequest) (*pb.PreemptionResponse, error) {
-	return &pb.PreemptionResponse{VictimResourceBindings: []pb.ObjectReference{}}, errors.New("Unimplemented")
+func (es *AccurateSchedulerEstimatorServer) GetVictimResourceBindings(ctx context.Context, request *pb.PreemptionRequest) (response *pb.PreemptionResponse, rerr error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		klog.Warningf("No metadata from context.")
+	}
+	var object string
+	if m := md.Get(string(util.ContextKeyObject)); len(m) != 0 {
+		object = m[0]
+	}
+
+	klog.V(4).Infof("Begin calculating cluster victim resourebindings to preempt for resource(%s), request: %s", object, pretty.Sprint(*request))
+	defer func(start time.Time) {
+		metrics.CountRequests(rerr, metrics.EstimatingTypeGetVictimResourceBindings)
+		metrics.UpdateEstimatingAlgorithmLatency(rerr, metrics.EstimatingTypeGetVictimResourceBindings, metrics.EstimatingStepTotal, start)
+		if rerr != nil {
+			klog.Errorf("Failed to calculate cluster victim resourebindings: %v", rerr)
+			return
+		}
+		klog.V(2).Infof("Finish calculating cluster victim resourebindings to preempt for resource(%s), victim resourcebindings: %d, time elapsed: %s", object, response.VictimResourceBindings, time.Since(start))
+	}(time.Now())
+
+	if request.Cluster != es.clusterName {
+		return nil, fmt.Errorf("cluster name does not match, got: %s, desire: %s", request.Cluster, es.clusterName)
+	}
+
+	// find minimum set of resourcebindings for preemption.
+	startTime := time.Now()
+	resourcebindingObjRef, err := es.SelectVictims(ctx, request)
+	metrics.UpdateEstimatingAlgorithmLatency(err, metrics.EstimatingTypeGetVictimResourceBindings, metrics.EstimatingStepGetUnschedulablePodsOfWorkload, startTime)
+	if err != nil {
+		return nil, err
+	}
+	if len(resourcebindingObjRef) == 0 {
+		return &pb.PreemptionResponse{VictimResourceBindings: []pb.ObjectReference{}}, errors.New("No preemptable victims found for incoming resourcebinding")
+	}
+	return &pb.PreemptionResponse{VictimResourceBindings: resourcebindingObjRef}, nil
 }
 
 // newPodInformer creates a shared index informer that returns only non-terminal pods.

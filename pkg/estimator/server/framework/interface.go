@@ -21,10 +21,12 @@ import (
 	"errors"
 	"strings"
 
+	// Add this import
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 
 	"github.com/karmada-io/karmada/pkg/estimator/pb"
+	"github.com/karmada-io/karmada/pkg/estimator/server/preemptee"
 	schedcache "github.com/karmada-io/karmada/pkg/util/lifted/scheduler/cache"
 )
 
@@ -39,6 +41,8 @@ type Framework interface {
 	// it is merged from all plugins returned result codes
 	RunEstimateReplicasPlugins(ctx context.Context, snapshot *schedcache.Snapshot, replicaRequirements *pb.ReplicaRequirements) (int32, *Result)
 	// TODO(wengyao04): we can add filter and score plugin extension points if needed in the future
+	RunPreemptionFilterPlugins(ctx context.Context, candidateVictims *map[string]preemptee.CandidateVictim, preemptionRequest *pb.PreemptionRequest) (*map[string]preemptee.CandidateVictim, *Result)
+	RunPreemptionOrderPlugins(ctx context.Context, candidateVictims *map[string]preemptee.CandidateVictim, preemptionRequest *pb.PreemptionRequest) ([]*preemptee.CandidateVictim, *Result)
 }
 
 // Plugin is the parent type for all the scheduling framework plugins.
@@ -56,6 +60,27 @@ type EstimateReplicasPlugin interface {
 	// The Result contains code, reasons and error
 	// it is merged from all plugins returned result codes
 	Estimate(ctx context.Context, snapshot *schedcache.Snapshot, replicaRequirements *pb.ReplicaRequirements) (int32, *Result)
+}
+
+// PreemptionOrderPlugin is an interface for preemptee resourceBinding ordering plugins.
+// These plugins are used to order the preemptee resourceBinding for a given pb.PreemptionRequest
+type PreemptionOrderPlugin interface {
+	Plugin
+	// Order is called for each GetVictimResourceBindings request.
+	// It returns an slice of resourceBinding Object References and an error
+	// The slice represents the optimal preemptee resourceBindings selected for the given preemptor's replicaRequirements
+	// The Result contains code, reasons and error
+	// it is merged from all plugins returned result codes
+	Order(ctx context.Context, candidateVictims *map[string]preemptee.CandidateVictim, replicaRequirements *pb.PreemptionRequest) ([]*preemptee.CandidateVictim, *Result)
+}
+
+// PreemptionFilterPlugin is an interface for preemption plugins.
+// These plugins are used to determine which pods should be preempted on a given cluster.
+type PreemptionFilterPlugin interface {
+	Plugin
+	// Preempt is called to determine which pods should be preempted.
+	// It takes a snapshot of the current cluster state and returns a list of pods to be preempted.
+	Filter(ctx context.Context, candidateVictims *map[string]preemptee.CandidateVictim, preemptionRequest *pb.PreemptionRequest) *Result
 }
 
 // Handle provides data and some tools that plugins can use. It is
