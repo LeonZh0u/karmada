@@ -34,8 +34,8 @@ const (
 	resourceLimitsPrefix   = "limits."
 )
 
-// resourceQuotaEstimator is to estimate how many replica allowed by the ResourceQuota constrain for a given pb.ReplicaRequirements
-// Kubernetes ResourceQuota object provides constraints that limit aggregate resource consumption per namespace
+// PriorityClassFilter is to filter out victim resourcebindings with higher or null priorityClass value for a given pb.PreemptionRequest
+// Kubernetes PriorityClass object defines the relative importance of a pod for preemption.
 type PriorityClassFilter struct {
 	enabled bool
 }
@@ -59,7 +59,7 @@ func (pl *PriorityClassFilter) Name() string {
 	return Name
 }
 
-// Estimate the replica allowed by the ResourceQuota
+// Filter/remove the pods with higher (or null) priority than the request.
 func (pl *PriorityClassFilter) Filter(_ context.Context,
 	victims *map[string]preemptee.CandidateVictim, request *pb.PreemptionRequest) *framework.Result {
 	if !pl.enabled {
@@ -69,7 +69,7 @@ func (pl *PriorityClassFilter) Filter(_ context.Context,
 	priorityValue := request.ReplicaRequirements.Priority
 
 	for rbID, victim := range *victims {
-		if priorityValue <= *victim.Priority {
+		if victim.Priority == nil || priorityValue <= *victim.Priority {
 			delete(*victims, rbID)
 		}
 	}

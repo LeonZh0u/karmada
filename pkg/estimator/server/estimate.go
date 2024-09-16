@@ -179,6 +179,13 @@ func (es *AccurateSchedulerEstimatorServer) selectVictims(
 	for _, candidateVictim := range orderedCandidateVictims {
 		victimResourceBindings = append(victimResourceBindings, *candidateVictim.ResourceBinding)
 	}
+
+	// Subtract all requested resources and pod numbers from allocatable for the node.
+	for _, node := range allNodes {
+		node.Allocatable.SubResource(node.Requested)
+		node.Allocatable.AllowedPodNumber = util.MaxInt64(node.Allocatable.AllowedPodNumber-int64(len(node.Pods)), 0)
+	}
+
 	for cnt, candidateVictim := range orderedCandidateVictims {
 		var victimRbs int32
 		processNode := func(i int) {
@@ -189,11 +196,13 @@ func (es *AccurateSchedulerEstimatorServer) selectVictims(
 			}
 
 			nodeName := node.Node().Name
-			// Add each additional victim's resources to the releasedNodeResources
+			// Add each additional victim's released resources to the allocatable for the node
 			resource := candidateVictim.NodeResources[nodeName].ResourceList()
 			node.Allocatable.Add(resource)
-
-			maxVictimReplica := es.nodeMaxAvailableReplica(node, requirements.ResourceRequest)
+			// Update AllowedPodNumber for the node with number of released pods
+			node.Allocatable.AllowedPodNumber += candidateVictim.NumVictimPods[nodeName]
+			// Calculate the max replicas that can be scheduled on the node after preempting the victim
+			maxVictimReplica := int32(node.Allocatable.MaxDivided(requirements.ResourceRequest))
 			atomic.AddInt32(&victimRbs, maxVictimReplica)
 		}
 		es.parallelizer.Until(ctx, len(allNodes), processNode)

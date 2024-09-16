@@ -35,8 +35,8 @@ const (
 	Name = "DefaultPreemptionOrderEstimate"
 )
 
-// resourceQuotaEstimator is to estimate how many replica allowed by the ResourceQuota constrain for a given pb.ReplicaRequirements
-// Kubernetes ResourceQuota object provides constraints that limit aggregate resource consumption per namespace
+// PreemptionOrderEstimator is to decide the relative order of the preemptable victim resource bindings by most resource released.
+// By preempting victims that can release the most amount of resources, less user will be affected by each preemption.
 type PreemptionOrderEstimator struct {
 	enabled bool
 }
@@ -60,7 +60,7 @@ func (pl *PreemptionOrderEstimator) Name() string {
 	return Name
 }
 
-// Estimate the replica allowed by the ResourceQuota
+// Order the victims according to the amount of resources each resource binding holds.
 func (pl *PreemptionOrderEstimator) Order(_ context.Context,
 	victims *map[string]preemptee.CandidateVictim, request *pb.PreemptionRequest) ([]*preemptee.CandidateVictim, *framework.Result) {
 	if !pl.enabled {
@@ -70,7 +70,10 @@ func (pl *PreemptionOrderEstimator) Order(_ context.Context,
 	// Convert CandidateVictim map to slice
 	victimsSlice := make([]*preemptee.CandidateVictim, len(*victims))
 	for _, victim := range *victims {
-		victimsSlice = append(victimsSlice, &victim)
+		// Ignore victim resource binding with null priority
+		if victim.Priority != nil {
+			victimsSlice = append(victimsSlice, &victim)
+		}
 	}
 	// Sort CandidateVictim slice by priority first and then break ties by total resource.
 	sort.SliceStable(victimsSlice, func(i, j int) bool {

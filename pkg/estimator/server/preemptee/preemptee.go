@@ -28,7 +28,10 @@ import (
 )
 
 type CandidateVictim struct {
-	NodeResources   map[string]*util.Resource
+	// maps node name to the resource that candidate victim holds
+	NodeResources map[string]*util.Resource
+	// maps node name to the number of pods in the candidate victim
+	NumVictimPods   map[string]int64
 	ResourceBinding *pb.ObjectReference
 	Priority        *int32
 }
@@ -66,22 +69,26 @@ func ListCandidateVictims(kind string, pl *PreempteeLister) (
 		if permanentID != "" {
 			nodeName := pod.Spec.NodeName
 
+			// Construct a new candidate victim with permanentID maps to empty value
 			if _, ok := candidateVictims[permanentID]; !ok {
-				// Construct a new candidate victim
 				candidateVictims[permanentID] = CandidateVictim{
 					NodeResources: map[string]*util.Resource{},
 					ResourceBinding: &pb.ObjectReference{
-						APIVersion: workv1alpha2.SchemeGroupVersion.String(),
+						APIVersion: workv1alpha2.GroupVersion.Version,
 						Kind:       kind,
 						Namespace:  pod.Namespace,
 						Name:       pod.Annotations[workv1alpha2.ResourceBindingNameAnnotationKey],
 					},
 					Priority: pod.Spec.Priority,
 				}
+			}
+			// Update the node resources under the current candidate victim
+			updatedNodeResource := candidateVictims[permanentID].NodeResources[nodeName].AddPodRequest(&pod.Spec)
+			candidateVictims[permanentID].NodeResources[permanentID] = updatedNodeResource
+			if _, ok := candidateVictims[permanentID].NumVictimPods[nodeName]; !ok {
+				candidateVictims[permanentID].NumVictimPods[nodeName] = 1
 			} else {
-				// Update the node resources for the candidate victim
-				updatedNodeResource := candidateVictims[permanentID].NodeResources[nodeName].AddPodRequest(&pod.Spec)
-				candidateVictims[permanentID].NodeResources[permanentID] = updatedNodeResource
+				candidateVictims[permanentID].NumVictimPods[nodeName] += 1
 			}
 		}
 	}
