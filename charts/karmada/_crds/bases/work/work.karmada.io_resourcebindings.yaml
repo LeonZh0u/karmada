@@ -948,12 +948,29 @@ spec:
                       type: object
                     type: array
                 type: object
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+              preserveResourcesOnDeletion:
+                description: |-
+                  PreserveResourcesOnDeletion controls whether resources should be preserved on the
+                  member clusters when the binding object is deleted.
+                  If set to true, resources will be preserved on the member clusters.
+                  Default is false, which means resources will be deleted along with the binding object.
+                  This setting applies to all Work objects created under this binding object.
+                type: boolean
+=======
+>>>>>>> master
               preemptionPolicy:
                 description: |-
                   PreemptionPolicy is the Policy for preempting resource bindings
                   One of Never, PreemptLowerPriority.
                   Defaults to Never if unset.
                 type: string
+<<<<<<< HEAD
+=======
+>>>>>>> 84fb706ef (Update resourcebinding specs to support Priority&Preemption)
+>>>>>>> master
               propagateDeps:
                 description: |-
                   PropagateDeps tells if relevant resources should be propagated automatically.

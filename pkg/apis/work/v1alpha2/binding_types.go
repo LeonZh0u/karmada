@@ -154,15 +154,16 @@ type ResourceBindingSpec struct {
 	// +optional
 	Suspension *policyv1alpha1.Suspension `json:"suspension,omitempty"`
 
+	// PreserveResourcesOnDeletion controls whether resources should be preserved on the
+	// member clusters when the binding object is deleted.
+	// If set to true, resources will be preserved on the member clusters.
+	// Default is false, which means resources will be deleted along with the binding object.
+	// This setting applies to all Work objects created under this binding object.
+	// +optional
+	PreserveResourcesOnDeletion *bool `json:"preserveResourcesOnDeletion,omitempty"`
 	// NominatedClusters represent target member clusters where the preempting resource can be deployed.
 	// +optional
 	NominatedClusters []TargetCluster `json:"nominatedClusters,omitempty"`
-
-	// PreemptionPolicy is the Policy for preempting resource bindings
-	// One of Never, PreemptLowerPriority.
-	// Defaults to Never if unset.
-	// +optional
-	PreemptionPolicy *corev1.PreemptionPolicy `json:"preemptionPolicy,omitempty"`
 }
 
 // ObjectReference contains enough information to locate the referenced object inside current cluster.
