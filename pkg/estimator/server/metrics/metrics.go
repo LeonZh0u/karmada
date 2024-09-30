@@ -33,6 +33,8 @@ const (
 	EstimatingTypeMaxAvailableReplicas = "MaxAvailableReplicas"
 	// EstimatingTypeGetUnschedulableReplicas - label of estimating type
 	EstimatingTypeGetUnschedulableReplicas = "GetUnschedulableReplicas"
+	// EstimatingTypeGetVictimResourceBindings - label of estimating type
+	EstimatingTypeGetVictimResourceBindings = "GetVictimResourceBindings"
 )
 
 const (

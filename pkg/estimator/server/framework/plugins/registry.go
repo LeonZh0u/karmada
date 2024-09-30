@@ -17,6 +17,7 @@ limitations under the License.
 package plugins
 
 import (
+	"github.com/karmada-io/karmada/pkg/estimator/server/framework/plugins/priorityclass"
 	"github.com/karmada-io/karmada/pkg/estimator/server/framework/plugins/resourcequota"
 	"github.com/karmada-io/karmada/pkg/estimator/server/framework/runtime"
 )
@@ -25,6 +26,7 @@ import (
 func NewInTreeRegistry() runtime.Registry {
 	registry := runtime.Registry{
 		resourcequota.Name: resourcequota.New,
+		priorityclass.Name: priorityclass.New,
 	}
 	return registry
 }

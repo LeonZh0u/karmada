@@ -20178,13 +20178,37 @@
             "$ref": "#/definitions/com.github.karmada-io.karmada.pkg.apis.work.v1alpha2.GracefulEvictionTask"
           }
         },
+        "nominatedClusters": {
+          "description": "NominatedClusters represent target member clusters where the preempting resource can be deployed.",
+          "type": "array",
+          "items": {
+            "default": {},
+            "$ref": "#/definitions/com.github.karmada-io.karmada.pkg.apis.work.v1alpha2.TargetCluster"
+          }
+        },
         "placement": {
           "description": "Placement represents the rule for select clusters to propagate resources.",
           "$ref": "#/definitions/com.github.karmada-io.karmada.pkg.apis.policy.v1alpha1.Placement"
         },
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
         "preserveResourcesOnDeletion": {
           "description": "PreserveResourcesOnDeletion controls whether resources should be preserved on the member clusters when the binding object is deleted. If set to true, resources will be preserved on the member clusters. Default is false, which means resources will be deleted along with the binding object. This setting applies to all Work objects created under this binding object.",
           "type": "boolean"
+=======
+>>>>>>> master
+        "preemptionPolicy": {
+          "description": "PreemptionPolicy is the Policy for preempting resource bindings One of Never, PreemptLowerPriority. Defaults to Never if unset.\n\nPossible enum values:\n - `\"Never\"` means that pod never preempts other pods with lower priority.\n - `\"PreemptLowerPriority\"` means that pod can preempt other pods with lower priority.",
+          "type": "string",
+          "enum": [
+            "Never",
+            "PreemptLowerPriority"
+          ]
+<<<<<<< HEAD
+=======
+>>>>>>> 84fb706ef (Update resourcebinding specs to support Priority&Preemption)
+>>>>>>> master
         },
         "propagateDeps": {
           "description": "PropagateDeps tells if relevant resources should be propagated automatically. It is inherited from PropagationPolicy or ClusterPropagationPolicy. default false.",
@@ -20208,7 +20232,7 @@
           }
         },
         "rescheduleTriggeredAt": {
-          "description": "RescheduleTriggeredAt is a timestamp representing when the referenced resource is triggered rescheduling. When this field is updated, it means a rescheduling is manually triggered by user, and the expected behavior of this action is to do a complete recalculation without referring to last scheduling results. It works with the status.lastScheduledTime field, and only when this timestamp is later than timestamp in status.lastScheduledTime will the rescheduling actually execute, otherwise, ignored.\n\nIt is represented in RFC3339 form (like '2006-01-02T15:04:05Z') and is in UTC.",
+          "description": "RescheduleTriggeredAt is a timestamp representing when the referenced resource is triggered rescheduling. When this field is updated, it means a rescheduling is manually triggered by user, and the expected behavior of this action is to do a complete recalculation without referring to last scheduling results. It works with the status.lastScheduledTime field, and only when this timestamp is later than timestamp in status.lastScheduledTime will the rescheduling actually execute, otherwise, ignored.\n\nFor priority \u0026 preemption, when victim Resourcebindings are preempted, RescheduleTriggeredAt is updated for rescheduling victim resource bindings. It is represented in RFC3339 form (like '2006-01-02T15:04:05Z') and is in UTC.",
           "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Time"
         },
         "resource": {

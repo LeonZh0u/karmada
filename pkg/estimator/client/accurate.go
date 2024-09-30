@@ -38,6 +38,8 @@ func RegisterSchedulerEstimator(se *SchedulerEstimator) {
 
 type getClusterReplicasFunc func(ctx context.Context, cluster string) (int32, error)
 
+type getResourceBindingsFunc func(ctx context.Context, cluster string) ([]workv1alpha2.ObjectReference, error)
+
 // SchedulerEstimator is an estimator that calls karmada-scheduler-estimator for estimation.
 type SchedulerEstimator struct {
 	cache   *SchedulerEstimatorCache
@@ -77,6 +79,65 @@ func (se *SchedulerEstimator) GetUnschedulableReplicas(
 	return getClusterReplicasConcurrently(parentCtx, clusters, se.timeout, func(ctx context.Context, cluster string) (int32, error) {
 		return se.maxUnscheduableReplicas(ctx, cluster, reference.DeepCopy(), unscheduableThreshold)
 	})
+}
+
+// GetVictimResourceBindings returns the best set of resourcebindings to preempt in order to schedule preemptor's replicas on the target cluster(s) by calling karmada-scheduler-estimator.
+func (se *SchedulerEstimator) GetVictimResourceBindings(
+	parentCtx context.Context,
+	clusters []*clusterv1alpha1.Cluster,
+	replicaRequirements *workv1alpha2.ReplicaRequirements,
+	replicas int32,
+	preemptor pb.ObjectReference,
+) ([][]workv1alpha2.ObjectReference, error) {
+	clusterNames := make([]string, len(clusters))
+	for i, cluster := range clusters {
+		clusterNames[i] = cluster.Name
+	}
+	return getClusterResourceBindingsConcurrently(parentCtx, clusterNames, se.timeout, func(ctx context.Context, cluster string) ([]workv1alpha2.ObjectReference, error) {
+		return se.getVictimResourceBindings(ctx, cluster, replicaRequirements.DeepCopy(), replicas, preemptor)
+	})
+}
+
+func (se *SchedulerEstimator) getVictimResourceBindings(ctx context.Context, cluster string, replicaRequirements *workv1alpha2.ReplicaRequirements, replicas int32, preemptor pb.ObjectReference) ([]workv1alpha2.ObjectReference, error) {
+	client, err := se.cache.GetClient(cluster)
+	if err != nil {
+		return []workv1alpha2.ObjectReference{}, err
+	}
+
+	req := &pb.PreemptionRequest{
+		Cluster:             cluster,
+		ReplicaRequirements: pb.ReplicaRequirements{},
+		NumReplicas:         replicas,
+		Preemptor:           preemptor,
+	}
+	if replicaRequirements != nil {
+		req.ReplicaRequirements.ResourceRequest = replicaRequirements.ResourceRequest
+		req.ReplicaRequirements.Namespace = replicaRequirements.Namespace
+		req.ReplicaRequirements.PriorityClassName = replicaRequirements.PriorityClassName
+		if replicaRequirements.NodeClaim != nil {
+			req.ReplicaRequirements.NodeClaim = &pb.NodeClaim{
+				NodeAffinity: replicaRequirements.NodeClaim.HardNodeAffinity,
+				NodeSelector: replicaRequirements.NodeClaim.NodeSelector,
+				Tolerations:  replicaRequirements.NodeClaim.Tolerations,
+			}
+		}
+	}
+	res, err := client.GetVictimResourceBindings(ctx, req)
+	if err != nil {
+		return []workv1alpha2.ObjectReference{}, fmt.Errorf("gRPC request cluster(%s) estimator error when calling GetVictimResourceBindings: %v", cluster, err)
+	}
+	// convert pb.ObjectReference to workv1alpha2.ObjectReference
+	var resourceBindingRefs []workv1alpha2.ObjectReference
+	for _, pbObjectRef := range res.VictimResourceBindings {
+		workv1alpha2ObjectRef := workv1alpha2.ObjectReference{
+			APIVersion: pbObjectRef.APIVersion,
+			Kind:       pbObjectRef.Kind,
+			Namespace:  pbObjectRef.Namespace,
+			Name:       pbObjectRef.Name,
+		}
+		resourceBindingRefs = append(resourceBindingRefs, workv1alpha2ObjectRef)
+	}
+	return resourceBindingRefs, nil
 }
 
 func (se *SchedulerEstimator) maxAvailableReplicas(ctx context.Context, cluster string, replicaRequirements *workv1alpha2.ReplicaRequirements) (int32, error) {
@@ -159,4 +220,29 @@ func getClusterReplicasConcurrently(parentCtx context.Context, clusters []string
 		}
 	}
 	return clusterReplicas, utilerrors.AggregateGoroutines(funcs...)
+}
+
+func getClusterResourceBindingsConcurrently(parentCtx context.Context, clusters []string,
+	timeout time.Duration, getResourceBindings getResourceBindingsFunc) ([][]workv1alpha2.ObjectReference, error) {
+	// add object information into gRPC metadata
+	if u, ok := parentCtx.Value(util.ContextKeyObject).(string); ok {
+		parentCtx = metadata.AppendToOutgoingContext(parentCtx, string(util.ContextKeyObject), u)
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
+	defer cancel()
+
+	clusterResourceBindings := make([][]workv1alpha2.ObjectReference, len(clusters))
+	funcs := make([]func() error, len(clusters))
+	for index, cluster := range clusters {
+		localIndex, localCluster := index, cluster
+		funcs[index] = func() error {
+			resourceBindings, err := getResourceBindings(ctx, localCluster)
+			if err != nil {
+				return err
+			}
+			clusterResourceBindings[localIndex] = resourceBindings
+			return nil
+		}
+	}
+	return clusterResourceBindings, utilerrors.AggregateGoroutines(funcs...)
 }

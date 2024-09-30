@@ -356,6 +356,14 @@ func (in *ResourceBindingSpec) DeepCopyInto(out *ResourceBindingSpec) {
 	if in.PreserveResourcesOnDeletion != nil {
 		in, out := &in.PreserveResourcesOnDeletion, &out.PreserveResourcesOnDeletion
 		*out = new(bool)
+	if in.NominatedClusters != nil {
+		in, out := &in.NominatedClusters, &out.NominatedClusters
+		*out = make([]TargetCluster, len(*in))
+		copy(*out, *in)
+	}
+	if in.PreemptionPolicy != nil {
+		in, out := &in.PreemptionPolicy, &out.PreemptionPolicy
+		*out = new(v1.PreemptionPolicy)
 		**out = **in
 	}
 	return
