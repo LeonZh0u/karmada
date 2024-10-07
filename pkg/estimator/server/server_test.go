@@ -17,10 +17,16 @@ limitations under the License.
 package server
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
 	"reflect"
 	"testing"
 
+	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	"google.golang.org/grpc/metadata"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,6 +40,7 @@ import (
 
 	"github.com/karmada-io/karmada/cmd/scheduler-estimator/app/options"
 	"github.com/karmada-io/karmada/pkg/estimator/pb"
+	"github.com/karmada-io/karmada/pkg/features"
 	"github.com/karmada-io/karmada/pkg/util"
 	testhelper "github.com/karmada-io/karmada/test/helper"
 )
@@ -257,6 +264,285 @@ func TestAccurateSchedulerEstimatorServer_MaxAvailableReplicas(t *testing.T) {
 			}
 			if !reflect.DeepEqual(gotResponse, tt.wantResponse) {
 				t.Errorf("MaxAvailableReplicas() gotResponse = %v, want %v", gotResponse, tt.wantResponse)
+			}
+		})
+	}
+}
+
+func TestAccurateSchedulerEstimatorServer_SelectVictims(t *testing.T) {
+	opt := &options.Options{
+		ClusterName: "fake",
+	}
+	type args struct {
+		request *pb.PreemptionRequest
+	}
+	kind := "Deployment"
+	tests := []struct {
+		name         string
+		objs         []runtime.Object
+		rbRefs       map[string][]string
+		args         args
+		wantResponse *pb.PreemptionResponse
+		wantErr      bool
+		expectedErr  error
+	}{
+		{
+			name: "preempt with Default sorting criteria (Priority and then resources)",
+			// node 1 left: 2 cpu, 6 mem, 8 pod, 14 storage
+			// node 2 left: 3 cpu, 5 mem, 9 pod, 12 storage
+			objs: []runtime.Object{
+				testhelper.NewNode("machine1", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+				testhelper.NewNode("machine2", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+				// testhelper.NewNode("machine3", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod1", "machine1", 1*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb1",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb1",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod2", "machine1", 3*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb1",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb1",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod3", "machine1", 2*testhelper.ResourceUnitCPU, 4*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb2",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb2",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod4", "machine2", 5*testhelper.ResourceUnitCPU, 8*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb3",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb3",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod5", "machine2", 1*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb4",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb4",
+					},
+				)},
+			// request 1 cpu, 2 mem
+			args: args{
+				request: &pb.PreemptionRequest{
+					Cluster: "fake",
+					ReplicaRequirements: pb.ReplicaRequirements{
+						ResourceRequest: testhelper.NewResourceList(2*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+						Priority:        10000,
+					},
+					NumReplicas: 3,
+					Preemptor:   pb.ObjectReference{Kind: kind, Name: "deploy1"},
+				},
+			},
+			wantResponse: &pb.PreemptionResponse{
+				VictimResourceBindings: []pb.ObjectReference{
+					{APIVersion: workv1alpha2.GroupVersion.Version, Kind: workv1alpha2.ResourceKindResourceBinding, Name: "rb3"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "no preemptable victims found",
+			// node 1 left: 2 cpu, 6 mem, 8 pod, 14 storage
+			// node 2 left: 3 cpu, 5 mem, 9 pod, 12 storage
+			objs: []runtime.Object{
+				testhelper.NewNode("machine1", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+				testhelper.NewNode("machine2", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+				// testhelper.NewNode("machine3", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod1", "machine1", 1*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb1",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb1",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod2", "machine1", 3*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb1",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb1",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod3", "machine1", 2*testhelper.ResourceUnitCPU, 4*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb2",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb2",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod4", "machine2", 4*testhelper.ResourceUnitCPU, 8*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb3",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb3",
+					},
+				),
+				testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod5", "machine2", 1*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+					map[string]string{
+						workv1alpha2.ResourceBindingPermanentIDLabel: "rb4",
+						"app.kubernetes.io/kind":                     kind,
+					},
+					map[string]string{
+						workv1alpha2.ResourceBindingNameAnnotationKey: "rb4",
+					},
+				)},
+			// request 1 cpu, 2 mem
+			args: args{
+				request: &pb.PreemptionRequest{
+					Cluster: "fake",
+					ReplicaRequirements: pb.ReplicaRequirements{
+						ResourceRequest: testhelper.NewResourceList(2*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+						Priority:        0,
+					},
+					NumReplicas: 3,
+					Preemptor:   pb.ObjectReference{Kind: kind, Name: "deploy1"},
+				},
+			},
+			wantResponse: nil,
+			wantErr:      true,
+			expectedErr:  errors.New("preemption failed: no victim passed preemption filter"),
+		},
+		// {
+		// 	name: "preempt fewest total resources (rb with least resources first)",
+		// 	// node 1 left: 2 cpu, 6 mem, 8 pod, 14 storage
+		// 	// node 2 left: 3 cpu, 5 mem, 9 pod, 12 storage
+		// 	objs: []runtime.Object{
+		// 		testhelper.NewNode("machine1", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+		// 		testhelper.NewNode("machine2", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+		// 		// testhelper.NewNode("machine3", 8*testhelper.ResourceUnitCPU, 16*testhelper.ResourceUnitMem, 11*testhelper.ResourceUnitPod, 16*testhelper.ResourceUnitEphemeralStorage),
+		// 		testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod1", "machine1", 1*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingPermanentIDLabel: "rb1",
+		// 				"app.kubernetes.io/kind":                     kind,
+		// 			},
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingNameAnnotationKey: "rb1",
+		// 			},
+		// 		),
+		// 		testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod2", "machine1", 3*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingPermanentIDLabel: "rb1",
+		// 				"app.kubernetes.io/kind":                     kind,
+		// 			},
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingNameAnnotationKey: "rb1",
+		// 			},
+		// 		),
+		// 		testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod3", "machine1", 2*testhelper.ResourceUnitCPU, 4*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingPermanentIDLabel: "rb2",
+		// 				"app.kubernetes.io/kind":                     kind,
+		// 			},
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingNameAnnotationKey: "rb2",
+		// 			},
+		// 		),
+		// 		testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod4", "machine2", 4*testhelper.ResourceUnitCPU, 8*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingPermanentIDLabel: "rb3",
+		// 				"app.kubernetes.io/kind":                     kind,
+		// 			},
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingNameAnnotationKey: "rb3",
+		// 			},
+		// 		),
+		// 		testhelper.LabelAnnotatePod(testhelper.NewPodWithRequest("pod5", "machine2", 1*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, 2*testhelper.ResourceUnitEphemeralStorage),
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingPermanentIDLabel: "rb4",
+		// 				"app.kubernetes.io/kind":                     kind,
+		// 			},
+		// 			map[string]string{
+		// 				workv1alpha2.ResourceBindingNameAnnotationKey: "rb4",
+		// 			},
+		// 		)},
+		// 	// request 1 cpu, 2 mem
+		// 	args: args{
+		// 		request: &pb.PreemptionRequest{
+		// 			Cluster: "fake",
+		// 			ReplicaRequirements: pb.ReplicaRequirements{
+		// 				ResourceRequest: testhelper.NewResourceList(2*testhelper.ResourceUnitCPU, 3*testhelper.ResourceUnitMem, testhelper.ResourceUnitZero),
+		// 				Priority:        10000,
+		// 			},
+		// 			NumReplicas: 3,
+		// 			Preemptor:   pb.ObjectReference{Kind: kind, Name: "deploy1"},
+		// 		},
+		// 	},
+		// 	wantResponse: &pb.PreemptionResponse{
+		// 		VictimResourceBindings: []pb.ObjectReference{
+		// 			{APIVersion: workv1alpha2.GroupVersion.Version, Kind: workv1alpha2.ResourceKindResourceBinding, Name: "rb1"},
+		// 		},
+		// 	},
+		// 	wantErr: false,
+		// },
+	}
+	features.FeatureGate.Set(fmt.Sprintf("%s=%t", features.DefaultPreemptionOrderEstimate, true))
+	features.FeatureGate.Set(fmt.Sprintf("%s=%t", features.PriorityClassFilterEstimate, true))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			gvrToListKind := map[schema.GroupVersionResource]string{
+				{Group: "apps", Version: "v1", Resource: "deployments"}: "DeploymentList",
+			}
+			dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), gvrToListKind)
+			discoveryClient := &discoveryfake.FakeDiscovery{
+				Fake: &coretesting.Fake{},
+			}
+			discoveryClient.Resources = []*metav1.APIResourceList{
+				{
+					GroupVersion: appsv1.SchemeGroupVersion.String(),
+					APIResources: []metav1.APIResource{
+						{Name: "deployments", Namespaced: true, Kind: "Deployment"},
+					},
+				},
+			}
+
+			es, _ := NewEstimatorServer(fake.NewSimpleClientset(tt.objs...), dynamicClient, discoveryClient, opt, ctx.Done())
+
+			es.informerFactory.Start(ctx.Done())
+			es.informerFactory.WaitForCacheSync(ctx.Done())
+			es.informerManager.WaitForCacheSync()
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer func() {
+				log.SetOutput(os.Stderr)
+			}()
+			gotResponse, err := es.GetVictimResourceBindings(ctx, tt.args.request)
+			t.Log(buf.String())
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetVictimResourceBindings() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			} else if tt.wantErr && !reflect.DeepEqual(err, tt.expectedErr) {
+				t.Errorf("GetVictimResourceBindings() error = %v, expected error = %v", err, tt.expectedErr)
+			}
+			if !reflect.DeepEqual(gotResponse, tt.wantResponse) {
+				t.Errorf("GetVictimResourceBindings() gotResponse = %v, want %v", gotResponse, tt.wantResponse)
 			}
 		})
 	}

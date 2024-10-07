@@ -534,6 +534,7 @@ func NewResourceList(milliCPU, memory, ephemeralStorage int64) corev1.ResourceLi
 
 // NewPodWithRequest will build a Pod with resource request.
 func NewPodWithRequest(pod, node string, milliCPU, memory, ephemeralStorage int64) *corev1.Pod {
+	defaultPriority := int32(100)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: pod, UID: types.UID(pod)},
 		Spec: corev1.PodSpec{
@@ -549,11 +550,19 @@ func NewPodWithRequest(pod, node string, milliCPU, memory, ephemeralStorage int6
 					},
 				},
 			},
+			Priority: &defaultPriority,
 		},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
 		},
 	}
+}
+
+// LabelAnnotatePod will patch a Pod with labels and annotations.
+func LabelAnnotatePod(pod *corev1.Pod, labels map[string]string, annotations map[string]string) *corev1.Pod {
+	pod.SetLabels(labels)
+	pod.SetAnnotations(annotations)
+	return pod
 }
 
 // NewNode will build a ready node with resource.

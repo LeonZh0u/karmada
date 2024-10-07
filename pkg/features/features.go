@@ -43,6 +43,12 @@ const (
 
 	// ResourceQuotaEstimate indicates if enable resource quota check in estimator
 	ResourceQuotaEstimate featuregate.Feature = "ResourceQuotaEstimate"
+
+	// PriorityClassEstimate indicates if enable priorityClass based filter for priority & premption in estimator
+	PriorityClassFilterEstimate featuregate.Feature = "PriorityClassFilterEstimate"
+
+	// DefaultPreemptionOrderEstimate indicates if enable priorityClass based filter for priority & premption in estimator
+	DefaultPreemptionOrderEstimate featuregate.Feature = "DefaultPreemptionOrderEstimate"
 )
 
 var (
@@ -57,7 +63,9 @@ var (
 		CustomizedClusterResourceModeling: {Default: true, PreRelease: featuregate.Beta},
 		PolicyPreemption:                  {Default: false, PreRelease: featuregate.Alpha},
 		MultiClusterService:               {Default: false, PreRelease: featuregate.Alpha},
-		ResourceQuotaEstimate:             {Default: false, PreRelease: featuregate.Alpha},
+		ResourceQuotaEstimate:             {Default: true, PreRelease: featuregate.Alpha},
+		PriorityClassFilterEstimate:       {Default: true, PreRelease: featuregate.Alpha},
+		DefaultPreemptionOrderEstimate:    {Default: true, PreRelease: featuregate.Alpha},
 	}
 )
 
